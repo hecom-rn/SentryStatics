@@ -1,7 +1,7 @@
 import * as Sentry from '@sentry/react-native';
 import { Span, Transaction, TransactionContext, MeasurementUnit } from '@sentry/types';
 
-const rootNode: { [key: string]: Transaction } = {};
+const rootNode: { [traceId: string]: { name: string; transaction: Transaction } } = {};
 
 /**
  * sentry 开始一件事务 开始计时
@@ -9,15 +9,17 @@ const rootNode: { [key: string]: Transaction } = {};
  * @export
  * @param {string} name 事务名称
  * @param {TransactionContext} options 可选配置
+ * @returns {string} traceId
  */
-export function startTransaction(name: string, options?: TransactionContext) {
+export function startTransaction(name: string, options?: TransactionContext): string {
     const transaction = Sentry.startTransaction({
         name,
         op: 'start', // 任意 string 意为：Operation
         ...(options || {}),
     });
     Sentry.getCurrentHub().configureScope((scope) => scope.setSpan(transaction));
-    rootNode[name] = transaction;
+    rootNode[transaction.traceId] = { name, transaction };
+    return transaction.traceId;
 }
 
 /**
@@ -27,9 +29,20 @@ export function startTransaction(name: string, options?: TransactionContext) {
  * @param {string} name 事务名称
  * @param {() => void} block
  * @param {TransactionContext} options 可选配置
+ * @param {string} traceId 使用指定traceId的事务， 当有重复的name时，可使用traceId
  */
-export function addTransactionSpan(name: string, block: () => void, options?: TransactionContext) {
-    const transaction: Transaction = rootNode[name];
+export function addTransactionSpan(
+    name: string,
+    block: () => void,
+    options?: TransactionContext,
+    traceId?: string
+) {
+    let transaction: Transaction;
+    if (traceId) {
+        transaction = rootNode[traceId]?.transaction;
+    } else {
+        transaction = Object.values(rootNode).find((item) => item.name === name)?.transaction;
+    }
     if (transaction) {
         const span: Span = transaction.startChild({
             op: 'appendSpan',
@@ -47,12 +60,19 @@ export function addTransactionSpan(name: string, block: () => void, options?: Tr
  * @export
  * @param {string} name 事务名称
  * @param {{ name: string; value: number; unit: MeasurementUnit }} measurementData
+ * @param {string} traceId 使用指定traceId的事务， 当有重复的name时，可使用traceId
  */
 export function setMeasurement(
     name: string,
-    measurementData: { name: string; value: number; unit: MeasurementUnit }
+    measurementData: { name: string; value: number; unit: MeasurementUnit },
+    traceId?: string
 ) {
-    const transaction: Transaction = rootNode[name];
+    let transaction: Transaction;
+    if (traceId) {
+        transaction = rootNode[traceId]?.transaction;
+    } else {
+        transaction = Object.values(rootNode).find((item) => item.name === name)?.transaction;
+    }
     if (transaction) {
         const { name: measurementName, value, unit } = measurementData;
         transaction.setMeasurement(measurementName, value, unit);
@@ -64,10 +84,17 @@ export function setMeasurement(
  *
  * @export
  * @param {string} name 事务名称
+ * @param {string} traceId 使用指定traceId的事务， 当有重复的name时，可使用traceId
  */
-export function finishTransaction(name: string) {
-    const transaction: Transaction = rootNode[name];
+export function finishTransaction(name: string, traceId?: string) {
+    let transaction: Transaction;
+    if (traceId) {
+        transaction = rootNode[traceId]?.transaction;
+    } else {
+        transaction = Object.values(rootNode).find((item) => item.name === name)?.transaction;
+    }
     if (transaction) {
         transaction.finish();
+        delete rootNode[transaction.traceId];
     }
 }

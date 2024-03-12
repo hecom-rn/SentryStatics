@@ -1,0 +1,16 @@
+{
+  "name": "@hecom/sentryStatics",
+  "version": "1.0.0",
+  "description": "sentry Statics",
+  "main": "index.ts",
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hecom-rn/SentryStatics"
+  },
+  "author": "mashuai",
+  "license": "MIT",
+  "peerDependencies": {
+    "@sentry/react-native": "*"
+  }
+}

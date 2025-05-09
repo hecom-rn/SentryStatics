@@ -1,15 +1,15 @@
 import * as Sentry from '@sentry/react-native';
-import { Span, Transaction, TransactionContext, MeasurementUnit } from '@sentry/types';
+import { Span, StartSpanOptions } from '@sentry/core';
 
 const rootNode: {
     [traceId: string]: {
         name: string;
-        transaction: Transaction;
-        span?: {
+        span: Span;
+        children?: {
             [spanId: string]: {
-                spanName: string;
+                name: string;
                 span: Span;
-            };
+            }
         }
     }
 } = {};
@@ -19,19 +19,44 @@ const rootNode: {
  *
  * @export
  * @param {string} name 事务名称
- * @param {TransactionContext} options 可选配置
+ * @param {StartSpanOptions} options 可选配置
  * @returns {string} traceId
  */
-export function startTransaction(name: string, options?: TransactionContext): string {
-    const transaction = Sentry.startTransaction({
+export function startTransaction(name: string, options?: StartSpanOptions): string {
+    const span = Sentry.startInactiveSpan({
         name,
         op: 'operationStart', // 任意 string 意为：Operation
         ...(options || {}),
     });
-    Sentry.getCurrentHub().configureScope((scope) => scope.setSpan(transaction));
-    rootNode[transaction.traceId] = { name, transaction };
-    return transaction.traceId;
+    const spanContext = span.spanContext();
+    rootNode[spanContext.traceId] = { name, span };
+    return spanContext.traceId;
 }
+
+
+
+
+/**
+ * sentry 结束事务 停止计时
+ *
+ * @export
+ * @param {string} name 事务名称
+ * @param {string} traceId 使用指定traceId的事务， 当有重复的name时，可使用traceId
+ */
+export function finishTransaction(name: string, traceId?: string) {
+    let span: Span;
+    if (traceId) {
+        span = rootNode[traceId]?.span;
+    } else {
+        span = Object.values(rootNode).find((item) => item.name === name)?.span;
+    }
+    if (span) {
+        span.end();
+        const spanContext = span.spanContext();
+        delete rootNode[spanContext.traceId];
+    }
+}
+
 
 /**
  * 给对应事务 添加一个跨度
@@ -40,43 +65,46 @@ export function startTransaction(name: string, options?: TransactionContext): st
  * @param {string} transactioName 事务名称
  * @param {string} spanName 跨度名称
  * @param {{
- *         context?: TransactionContext;
+ *         spanOptions?: StartSpanOptions;
  *         traceId?: string;
  *     }} [option]
- * @return {*}  {(string | undefined)}
+ * @return {*} spanId {(string | undefined)}
  */
 export function startTransactionSpan(
     transactioName: string,
     spanName: string,
     option?: {
-        context?: TransactionContext;
+        spanOptions?: StartSpanOptions;
         traceId?: string;
     }
 ): string | undefined {
-    const { context = {}, traceId } = option || {};
-    let transaction: Transaction;
+    const { traceId, spanOptions } = option || {};
+    let parentSpan: Span;
     if (traceId) {
-        transaction = rootNode[traceId]?.transaction;
+        parentSpan = rootNode[traceId]?.span;
     } else {
-        transaction = Object.values(rootNode).find((item) => item.name === transactioName)?.transaction;
+        parentSpan = Object.values(rootNode).find((item) => item.name === transactioName)?.span;
     }
-    if (transaction) {
-        const span: Span = transaction.startChild({
+    if (parentSpan) {
+        const span: Span = Sentry.startInactiveSpan({
+            name: spanName,
             op: spanName,
-            ...context,
-            // description: `processing shopping cart result`,
+            parentSpan,
+            ...(spanOptions || {}),
         });
-        rootNode[transaction.traceId] = {
-            ...rootNode[transaction.traceId],
-            span: {
-                ...(rootNode[transaction.traceId]?.span || {}),
-                [span.spanId]: {
+        const parentSpanContext = parentSpan.spanContext();
+        const spanContext = span.spanContext();
+        rootNode[parentSpanContext.traceId] = {
+            ...rootNode[parentSpanContext.traceId],
+            children: {
+                ...(rootNode[parentSpanContext.traceId]?.children || {}),
+                [spanContext.spanId]: {
                     span,
-                    spanName,
+                    name: spanName,
                 }
             }
         };
-        return span.spanId;
+        return spanContext.spanId;
     }
     return undefined;
 }
@@ -101,68 +129,23 @@ export function finishTransactionSpan(
     }
 ) {
     const { traceId, spanId } = option || {};
-    let transaction: Transaction;
+    let parentSpan: Span;
     if (traceId) {
-        transaction = rootNode[traceId]?.transaction;
+        parentSpan = rootNode[traceId]?.span;
     } else {
-        transaction = Object.values(rootNode).find((item) => item.name === transactioName)?.transaction;
+        parentSpan = Object.values(rootNode).find((item) => item.name === transactioName)?.span;
     }
-    if (transaction) {
+    if (parentSpan) {
         let span: Span;
+        const parentSpanContext = parentSpan.spanContext();
         if (spanId) {
-            span = rootNode[transaction.traceId]?.span?.[spanId]?.span;
+            span = rootNode[parentSpanContext.traceId]?.children?.[spanId]?.span;
         } else {
-            span = Object.values(rootNode[transaction.traceId]?.span || {}).find((item) => item.spanName === spanName)?.span;
+            span = Object.values(rootNode[parentSpanContext.traceId]?.children || {}).find((item) => item.name === spanName)?.span;
         }
         if (span) {
-            span.finish();
-            delete rootNode[transaction.traceId].span[spanId];
+            span.end();
+            delete rootNode[parentSpanContext.traceId].children[spanId];
         }
-    }
-}
-
-
-/**
- * 给对应事务补充统计数据，
- * eg: transaction.setMeasurement("memoryUsed", 123, "byte"); // 这个事务过程中使用了多少内存
- * @export
- * @param {string} name 事务名称
- * @param {{ name: string; value: number; unit: MeasurementUnit }} measurementData
- * @param {string} traceId 使用指定traceId的事务， 当有重复的name时，可使用traceId
- */
-export function setMeasurement(
-    name: string,
-    measurementData: { name: string; value: number; unit: MeasurementUnit },
-    traceId?: string
-) {
-    let transaction: Transaction;
-    if (traceId) {
-        transaction = rootNode[traceId]?.transaction;
-    } else {
-        transaction = Object.values(rootNode).find((item) => item.name === name)?.transaction;
-    }
-    if (transaction) {
-        const { name: measurementName, value, unit } = measurementData;
-        transaction.setMeasurement(measurementName, value, unit);
-    }
-}
-
-/**
- * sentry 结束事务 停止计时
- *
- * @export
- * @param {string} name 事务名称
- * @param {string} traceId 使用指定traceId的事务， 当有重复的name时，可使用traceId
- */
-export function finishTransaction(name: string, traceId?: string) {
-    let transaction: Transaction;
-    if (traceId) {
-        transaction = rootNode[traceId]?.transaction;
-    } else {
-        transaction = Object.values(rootNode).find((item) => item.name === name)?.transaction;
-    }
-    if (transaction) {
-        transaction.finish();
-        delete rootNode[transaction.traceId];
     }
 }

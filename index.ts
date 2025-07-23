@@ -26,6 +26,7 @@ export function startTransaction(name: string, options?: StartSpanOptions): stri
     const span = Sentry.startInactiveSpan({
         name,
         op: 'operationStart', // 任意 string 意为：Operation
+        forceTransaction: true,
         ...(options || {}),
     });
     const spanContext = span.spanContext();

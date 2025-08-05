@@ -14,6 +14,19 @@ const rootNode: {
     }
 } = {};
 
+const op: string[] = [];
+
+/**
+ *  获取已经设定过的op，用于Transaction过滤
+ *  
+ * @export
+ * @return {*} 
+ */
+export function getTransactionOP(){
+    return op;
+}
+
+
 /**
  * sentry 开始一件事务 开始计时
  *
@@ -23,12 +36,14 @@ const rootNode: {
  * @returns {string} traceId
  */
 export function startTransaction(name: string, options?: StartSpanOptions): string {
-    const span = Sentry.startInactiveSpan({
+    const params = {
         name,
         op: 'operationStart', // 任意 string 意为：Operation
         forceTransaction: true,
         ...(options || {}),
-    });
+    }
+    const span = Sentry.startInactiveSpan(params);
+    !op.includes(params.op) && op.push(params.op);
     const spanContext = span.spanContext();
     rootNode[spanContext.traceId] = { name, span };
     return spanContext.traceId;

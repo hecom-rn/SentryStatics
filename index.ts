@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/react-native';
-import { Span, StartSpanOptions } from '@sentry/core';
+import { Span, StartSpanOptions, SpanTimeInput } from '@sentry/core';
 
 const rootNode: {
     [traceId: string]: {
@@ -58,8 +58,9 @@ export function startTransaction(name: string, options?: StartSpanOptions): stri
  * @export
  * @param {string} name 事务名称
  * @param {string} traceId 使用指定traceId的事务， 当有重复的name时，可使用traceId
+ * @param {SpanTimeInput} endTimestamp 结束时间戳
  */
-export function finishTransaction(name: string, traceId?: string) {
+export function finishTransaction(name: string, traceId?: string, endTimestamp?: SpanTimeInput) {
     let span: Span;
     if (traceId) {
         span = rootNode[traceId]?.span;
@@ -67,7 +68,7 @@ export function finishTransaction(name: string, traceId?: string) {
         span = Object.values(rootNode).find((item) => item.name === name)?.span;
     }
     if (span) {
-        span.end();
+        span.end(endTimestamp);
         const spanContext = span.spanContext();
         delete rootNode[spanContext.traceId];
     }

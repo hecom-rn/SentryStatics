@@ -35,7 +35,7 @@ export function getTransactionOP(){
  * @param {StartSpanOptions} options 可选配置
  * @returns {string} traceId
  */
-export function startTransaction(name: string, options?: StartSpanOptions): string {
+export function startTransaction(name: string, options?: Partial<StartSpanOptions>): string {
     const params = {
         name,
         op: 'operationStart', // 任意 string 意为：Operation
@@ -79,7 +79,7 @@ export function finishTransaction(name: string, traceId?: string, endTimestamp?:
  * 给对应事务 添加一个跨度
  * 在对应的事物中间添加需要额外计时的子span
  * @export
- * @param {string} transactioName 事务名称
+ * @param {string} transactioName 事务名称, 数组时为多层级
  * @param {string} spanName 跨度名称
  * @param {{
  *         spanOptions?: StartSpanOptions;
@@ -88,28 +88,41 @@ export function finishTransaction(name: string, traceId?: string, endTimestamp?:
  * @return {*} spanId {(string | undefined)}
  */
 export function startTransactionSpan(
-    transactioName: string,
+    transactioName: string | string[],
     spanName: string,
     option?: {
-        spanOptions?: StartSpanOptions;
+        spanOptions?: Partial<StartSpanOptions>;
         traceId?: string;
     }
 ): string | undefined {
     const { traceId, spanOptions } = option || {};
     let parentSpan: Span;
+    let firstSpan: Span;
     if (traceId) {
         parentSpan = rootNode[traceId]?.span;
     } else {
-        parentSpan = Object.values(rootNode).find((item) => item.name === transactioName)?.span;
+        if (Array.isArray(transactioName)) {
+            const [first, ...rest] = transactioName;
+            let parent = Object.values(rootNode).find((item) => item.name === first);
+            firstSpan = parent?.span;
+            for (const name of rest) {
+                parent = Object.values(parent?.children || {}).find((item) => item.name === name);
+            }
+            parentSpan = parent?.span;
+        } else {
+            parentSpan = Object.values(rootNode).find((item) => item.name === transactioName)?.span;
+            firstSpan = parentSpan;
+        }
     }
-    if (parentSpan) {
+    if (parentSpan && firstSpan) {
+        // Sentry.startSpan
         const span: Span = Sentry.startInactiveSpan({
             name: spanName,
             op: spanName,
             parentSpan,
             ...(spanOptions || {}),
         });
-        const parentSpanContext = parentSpan.spanContext();
+        const parentSpanContext = firstSpan.spanContext();
         const spanContext = span.spanContext();
         rootNode[parentSpanContext.traceId] = {
             ...rootNode[parentSpanContext.traceId],
@@ -138,7 +151,7 @@ export function startTransactionSpan(
  *     }} [option]
  */
 export function finishTransactionSpan(
-    transactioName: string,
+    transactioName: string | string[],
     spanName: string,
     option?: {
         traceId?: string;
@@ -150,7 +163,8 @@ export function finishTransactionSpan(
     if (traceId) {
         parentSpan = rootNode[traceId]?.span;
     } else {
-        parentSpan = Object.values(rootNode).find((item) => item.name === transactioName)?.span;
+        const name = Array.isArray(transactioName) ? transactioName[0] : transactioName;
+        parentSpan = Object.values(rootNode).find((item) => item.name === name)?.span;
     }
     if (parentSpan) {
         let span: Span;

@@ -26,6 +26,13 @@ export function getTransactionOP(){
     return op;
 }
 
+export function clearAllTransaction(){
+    Object.keys(rootNode).forEach((key) => {
+        console.log('clear transaction:', key, rootNode[key].name);
+        delete rootNode[key];
+    })
+}
+
 
 /**
  * sentry 开始一件事务 开始计时

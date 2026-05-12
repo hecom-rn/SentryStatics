@@ -29,6 +29,11 @@ export function getTransactionOP(){
 export function clearAllTransaction(){
     Object.keys(rootNode).forEach((key) => {
         console.log('clear transaction:', key, rootNode[key].name);
+        const node = rootNode[key];
+        if (node?.children) {
+            Object.values(node.children).forEach((child) => child.span?.end());
+        }
+        node?.span?.end();
         delete rootNode[key];
     })
 }
